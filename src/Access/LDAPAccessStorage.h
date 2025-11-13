@@ -8,6 +8,7 @@
 #include <map>
 #include <mutex>
 #include <set>
+#include <optional>
 #include <vector>
 
 
@@ -36,6 +37,8 @@ public:
     ~LDAPAccessStorage() override = default;
 
     String getLDAPServerName() const;
+
+    std::optional<UUID> provisionUserForKerberos(const String & user_name, const std::optional<String> & kerberos_realm) const;
 
     // IAccessStorage implementations.
     const char * getStorageType() const override;

@@ -5,6 +5,7 @@
 #include <Access/UsersConfigAccessStorage.h>
 #include <Access/DiskAccessStorage.h>
 #include <Access/LDAPAccessStorage.h>
+#include <Access/GSSAcceptor.h>
 #include <Access/ContextAccess.h>
 #include <Access/EnabledSettings.h>
 #include <Access/EnabledRolesInfo.h>
@@ -602,6 +603,23 @@ AuthResult AccessControl::authenticate(const Credentials & credentials, const Po
         authentication_quota->used(QuotaType::FAILED_SEQUENTIAL_AUTHENTICATIONS, 1);
     }
 
+    if (const auto * gss_credentials = typeid_cast<const GSSAcceptorContext *>(&credentials))
+    {
+        if (gss_credentials->isReady())
+        {
+            auto kerberos_params = external_authenticators->getKerberosParams();
+            if (!kerberos_params.ldap_server.empty())
+            {
+                std::optional<String> kerberos_realm;
+                const auto & realm = gss_credentials->getRealm();
+                if (!realm.empty())
+                    kerberos_realm = realm;
+
+                tryProvisionKerberosUserFromLDAP(kerberos_params.ldap_server, credentials.getUserName(), kerberos_realm);
+            }
+        }
+    }
+
     try
     {
         const auto auth_result = MultipleAccessStorage::authenticate(credentials, address, *external_authenticators, client_info,
@@ -653,6 +671,31 @@ void AccessControl::restoreFromBackup(RestorerFromBackup & restorer, const Strin
 {
     MultipleAccessStorage::restoreFromBackup(restorer, data_path_in_backup);
     changes_notifier->sendNotifications();
+}
+
+bool AccessControl::tryProvisionKerberosUserFromLDAP(const String & ldap_server, const String & user_name, const std::optional<String> & kerberos_realm) const
+{
+    if (find<User>(user_name))
+        return false;
+
+    auto storages = getStorages();
+    for (const auto & storage : storages)
+    {
+        auto ldap_storage = std::dynamic_pointer_cast<const LDAPAccessStorage>(storage);
+        if (!ldap_storage)
+            continue;
+
+        if (ldap_storage->getLDAPServerName() != ldap_server)
+            continue;
+
+        if (ldap_storage->provisionUserForKerberos(user_name, kerberos_realm))
+        {
+            LOG_DEBUG(getLogger(), "Provisioned Kerberos user '{}' via LDAP server '{}'", user_name, ldap_server);
+            return true;
+        }
+    }
+
+    return false;
 }
 
 void AccessControl::setExternalAuthenticatorsConfig(const Poco::Util::AbstractConfiguration & config)

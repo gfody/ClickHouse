@@ -31,6 +31,7 @@ public:
         String principal;
         String realm;
         String keytab;
+        String ldap_server;
     };
 
     explicit GSSAcceptorContext(const Params & params_);

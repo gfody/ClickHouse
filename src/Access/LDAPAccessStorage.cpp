@@ -1,6 +1,7 @@
 #include <Access/LDAPAccessStorage.h>
 #include <Access/AccessControl.h>
 #include <Access/ExternalAuthenticators.h>
+#include <Access/GSSAcceptor.h>
 #include <Access/User.h>
 #include <Access/Role.h>
 #include <Access/Credentials.h>
@@ -37,6 +38,26 @@ String LDAPAccessStorage::getLDAPServerName() const
 {
     std::lock_guard lock(mutex);
     return ldap_server_name;
+}
+
+
+std::optional<UUID> LDAPAccessStorage::provisionUserForKerberos(const String & user_name, const std::optional<String> & kerberos_realm) const
+{
+    std::lock_guard lock(mutex);
+
+    if (auto existing_id = memory_storage.find<User>(user_name))
+        return existing_id;
+
+    auto new_user = std::make_shared<User>();
+    new_user->setName(user_name);
+    new_user->authentication_methods.emplace_back(AuthenticationType::KERBEROS);
+    if (kerberos_realm && !kerberos_realm->empty())
+        new_user->authentication_methods.back().setKerberosRealm(*kerberos_realm);
+
+    LDAPClient::SearchResultsList external_roles(role_search_params.size());
+    assignRolesNoLock(*new_user, external_roles);
+
+    return memory_storage.insert(new_user);
 }
 
 
@@ -346,6 +367,16 @@ bool LDAPAccessStorage::areLDAPCredentialsValidNoLock(const User & user, const C
     if (typeid_cast<const AlwaysAllowCredentials *>(&credentials))
         return true;
 
+    if (const auto * gss_credentials = dynamic_cast<const GSSAcceptorContext *>(&credentials))
+    {
+        for (const auto & method : user.authentication_methods)
+        {
+            if (method.getType() == AuthenticationType::KERBEROS)
+                return external_authenticators.checkKerberosCredentials(method.getKerberosRealm(), *gss_credentials);
+        }
+        return false;
+    }
+
     if (const auto * basic_credentials = dynamic_cast<const BasicCredentials *>(&credentials))
         return external_authenticators.checkLDAPCredentials(ldap_server_name, *basic_credentials, &role_search_params, &role_search_results);
 
@@ -495,7 +526,50 @@ std::optional<AuthResult> LDAPAccessStorage::authenticateImpl(
     }
 
     if (id)
-        return AuthResult{ .user_id = *id, .authentication_data = AuthenticationData(AuthenticationType::LDAP) };
+    {
+        AuthenticationType matched_type = AuthenticationType::NO_PASSWORD;
+        AuthenticationData auth_data;
+
+        if (typeid_cast<const AlwaysAllowCredentials *>(&credentials))
+        {
+            matched_type = AuthenticationType::NO_PASSWORD;
+            auth_data = AuthenticationData(matched_type);
+        }
+        else if (const auto * gss_credentials = dynamic_cast<const GSSAcceptorContext *>(&credentials))
+        {
+            matched_type = AuthenticationType::KERBEROS;
+            auth_data = AuthenticationData(matched_type);
+
+            String kerberos_realm;
+            for (const auto & method : user->authentication_methods)
+            {
+                if (method.getType() == AuthenticationType::KERBEROS)
+                {
+                    kerberos_realm = method.getKerberosRealm();
+                    break;
+                }
+            }
+
+            if (!kerberos_realm.empty())
+                auth_data.setKerberosRealm(kerberos_realm);
+            else if (gss_credentials->isReady())
+            {
+                auth_data.setKerberosRealm(gss_credentials->getRealm());
+            }
+        }
+        else if (dynamic_cast<const BasicCredentials *>(&credentials))
+        {
+            matched_type = AuthenticationType::LDAP;
+            auth_data = AuthenticationData(matched_type);
+            auth_data.setLDAPServerName(ldap_server_name);
+        }
+        else
+        {
+            auth_data = AuthenticationData(matched_type);
+        }
+
+        return AuthResult{ .user_id = *id, .authentication_data = std::move(auth_data) };
+    }
     return std::nullopt;
 }
 

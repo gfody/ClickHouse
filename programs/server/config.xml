@@ -727,6 +727,9 @@
             realm - a realm, that will be used to restrict authentication to only those requests whose initiator's realm matches it.
                     This parameter is optional, if omitted, no additional filtering by realm will be applied.
                     This parameter cannot be specified together with 'principal' parameter.
+            ldap_server - name of an LDAP server defined in the <ldap_servers> section.
+                    This parameter is optional, when specified, users authenticated via Kerberos who have no record in local
+                    access storages will be provisioned using this LDAP server's configuration.
          Example:
             <kerberos />
          Example:

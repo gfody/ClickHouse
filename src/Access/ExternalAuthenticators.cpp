@@ -233,6 +233,7 @@ void parseKerberosParams(GSSAcceptorContext::Params & params, const Poco::Util::
     params.realm = config.getString("kerberos.realm", "");
     params.principal = config.getString("kerberos.principal", "");
     params.keytab = config.getString("kerberos.keytab", "");
+    params.ldap_server = config.getString("kerberos.ldap_server", "");
 }
 
 HTTPAuthClientParams parseHTTPAuthParams(const Poco::Util::AbstractConfiguration & config, const String & prefix)

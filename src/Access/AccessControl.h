@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 
 #include <Access/MultipleAccessStorage.h>
 #include <Access/Common/AuthenticationType.h>
@@ -267,6 +268,8 @@ private:
     bool insertImpl(const UUID & id, const AccessEntityPtr & entity, bool replace_if_exists, bool throw_if_exists, UUID * conflicting_id) override;
     bool removeImpl(const UUID & id, bool throw_if_not_exists) override;
     bool updateImpl(const UUID & id, const UpdateFunc & update_func, bool throw_if_not_exists) override;
+
+    bool tryProvisionKerberosUserFromLDAP(const String & ldap_server, const String & user_name, const std::optional<String> & kerberos_realm) const;
 
     std::unique_ptr<ContextAccessCache> context_access_cache;
     std::unique_ptr<RoleCache> role_cache;
